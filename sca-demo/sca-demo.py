@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.integrate import odeint # Example use of scipy, the function to calculate the jacobian could be manually defined or use a library
+from scipy.integrate import odeint 
 from scipy.differentiate import jacobian,hessian
 from cyipopt import minimize_ipopt
 
@@ -16,7 +16,7 @@ F_SC1 = np.linspace(F_C1, F_C1+(N_SC*SCS), N_SC)
 F_SC2 = np.linspace(F_C2, F_C2+(N_SC*SCS), N_SC)
 
 def constructMultipath(frequencies, delays, gains, delta, beta, L):
-    
+    delta *= 1e-9
     channel = np.zeros(N_SC, dtype=complex)
     for i in range(L):
         channel += gains[i]*np.exp(-1j*2*PI*frequencies*delays[i])
@@ -46,14 +46,11 @@ def objective(x, C_measured, L):
     x[-2]    = delta
     x[-1]    = beta 
     """
-    a_i    = x[0:L]
+    a_i    = x[0:L] * 1e-2
     phi_i  = x[L:2*L] * 1e-9 
-    a_hw1  = x[-6]
-    a_hw2  = x[-5]
-    delta1 = x[-4]
-    delta2 = x[-3]
-    beta1  = x[-2]
-    beta2  = x[-1]
+    delta_rel = x[-3] * 1e-9
+    beta1 = x[-2]
+    beta_rel =  x[-1]
     
     C_est1 = np.zeros(N_SC, dtype=complex)
     C_est2 = np.zeros(N_SC, dtype=complex)
@@ -62,25 +59,22 @@ def objective(x, C_measured, L):
         C_est1 += a_i[i] * np.exp(-1j * 2 * PI * F_SC1 * phi_i[i]) 
         C_est2 += a_i[i] * np.exp(-1j * 2 * PI * F_SC2 * phi_i[i])
     
-    C_est1 *= a_hw1 * np.exp(1j * (beta1 -2*PI*F_SC1*delta1))
-    C_est2 *= a_hw2 * np.exp(1j * (beta2 -2*PI*F_SC2*delta2))
+    C_est1 *= np.exp(1j*beta1)
+    C_est2 *=  np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
     C_composite = np.concatenate((C_est1, C_est2))
 
     error = C_measured - (C_composite)
-    print(np.sum(np.abs(error)**2))
     return np.sum(np.abs(error)**2)
 
 def runOptimization(c_ref, L, x0):
 
     bounds = []
-    for i in range(L): bounds.append((0, L))        # Amplitudes
-    for i in range(L): bounds.append((0, 200))         # Delays 
-    bounds.append((0, 1))                            # HW Gain
-    bounds.append((0, 1))                            # HW Gain
-    bounds.append((-PI, PI))                           # Delta
-    bounds.append((-PI, PI))                           # Delta
-    bounds.append((-PI, PI))                           # Beta
-    bounds.append((-PI, PI))                           # Beta
+    for i in range(L): bounds.append((0, L*1e2))        # Amplitudes
+    for i in range(L): bounds.append((0, 150))      # Delays 
+    bounds.append((-100, 200))                      # Relative Linear Phase
+    bounds.append((-PI/2, PI/2))                    # Baseline Phase Offset
+    bounds.append((-PI/2, PI/2))                    # Relative Phase Offset
+
 
 
     print("Starting delay-domain optimization...")
@@ -94,18 +88,21 @@ def runOptimization(c_ref, L, x0):
 
     print(f"Optimization Success: {res.success}")
     print(f"Extracted Amplitudes: {res.x[0:L]}")
-    print(f"Extracted Delays (ns): {res.x[L:2*L]}")
-    print(f"Extracted Constant Phase: {res.x[-1]}")
+    print(f"Extracted Apparent Delays (ns): {res.x[L:2*L]}")
+    print(f"Extracted Rel Delta (ns): {res.x[-2]}")
+    print(f"Extracted Rel Beta (rad): {res.x[-1]}")
     print(f"Objective Value: {res.fun}")
     return res
 
 ### PLOTTING ###
-def plotPerformance(channel1, channel2):
+def plotPerformance(channel1, channel2, channel_est):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
     # Plot 1: Amplitude
     ax1.plot(np.arange(len(channel1)), np.abs(channel1), marker='o', color='blue')
-    ax1.plot(np.arange(len(channel2)), np.abs(channel2), marker='o', color='red')
+    #ax1.plot(np.arange(len(channel2)), np.abs(channel2), marker='x', color='red')
+    ax1.plot(np.arange(len(channel2)), np.abs(channel_est), marker='s', color='green')
+
     ax1.set_title("Gain/Frequency")
     ax1.set_xlabel("Subcarrier")
     ax1.set_ylabel("Gain")
@@ -113,16 +110,25 @@ def plotPerformance(channel1, channel2):
 
     # Plot 2: Phase
     ax2.plot(np.arange(len(channel1)), np.unwrap(np.angle(channel1)),  marker='o', color='blue')
-    ax2.plot(np.arange(len(channel2)), np.unwrap(np.angle(channel2)),  marker='x', color='red')
+    #ax2.plot(np.arange(len(channel2)), np.unwrap(np.angle(channel2)),  marker='x', color='red')
+    ax2.plot(np.arange(len(channel2)), np.unwrap(np.angle(channel_est)),  marker='s', color='green')
+
     ax2.set_title("Phase/Frequency")
     ax2.set_xlabel("Subcarrier")
     ax2.set_ylabel("Phase")
     ax2.grid(True)
 
-    # fig2, (ax12, ax22) = plt.subplots(1, 2, figsize=(14, 5))
-
-
-
+    fig2, (ax12, ax22) = plt.subplots(1, 2, figsize=(14, 5))
+    ax12.plot(np.arange(len(channel2)), np.abs(channel2), marker='x', color='red')
+    ax22.plot(np.arange(len(channel2)), np.unwrap(np.angle(channel2)),  marker='x', color='red')
+    ax12.set_title("Gain/Frequency")
+    ax12.set_xlabel("Subcarrier")
+    ax12.set_ylabel("Gain")
+    ax22.grid(True)
+    ax22.set_title("Phase/Frequency")
+    ax22.set_xlabel("Subcarrier")
+    ax22.set_ylabel("Phase")
+    ax22.grid(True)
     plt.tight_layout()
     plt.show()
 
@@ -130,7 +136,7 @@ def main():
     #Do stuff
     # Hardware Phase Distortion
     z   = [PI/4, PI/6]          # CFO Phase Offset
-    sfo = [100*10**-9, 80*10**-9 ]    # SFO Linear Phase
+    sfo = [100, 80]    # SFO Linear Phase
 
     # Multipath Params
     L = 3
@@ -140,41 +146,46 @@ def main():
     channel2 = constructMultipath(F_SC2, multipath_delays, multipath_alphas, sfo[1], z[1], L)
     
     # Parameter Estimation
-    x0 = np.zeros(2*L + 6)
+    x0 = np.zeros(2*L + 3)
     # Initial Guesses
-    x0[0:L] = [0.75, 0.25, 0.20]            
-    x0[L:2*L] = [16.7, 22, 25]
-    x0[-6] = 1
-    x0[-5] = 1
-    x0[-4] = 100*10**-9
-    x0[-3] = 80*10**-9
-    x0[-2] = PI/4    
-    x0[-1] = PI/6
+    x0[0:L] = [50, 50, 10]           
+    x0[L:2*L] = [17.74 + sfo[0], 22.96 + sfo[0], 26.05 + sfo[0]]
+    x0[-3] = (sfo[1] - sfo[0]) + 0.04
+    x0[-2] = 0.0
+    x0[-1] = 0.0
+    ### TRUE VALUES FOR TESTING ###
+    # x0[0:L] = [0.75, 0.25, 0.20]            
+    # x0[L:2*L] = [16.7 + sfo[0], 22 + sfo[0], 25 + sfo[0]]
+    # x0[-3] = sfo[1]-sfo[0]
+    # x0[-2] = PI/4
+    # x0[-1] = z[1]-z[0]
 
     C_ref = np.concatenate((channel1, channel2))
     res = runOptimization(C_ref, L, x0)
 
-    '''
-     csi_data = los_gain*np.exp(-1j*2*PI*frequencies*T_PROP)
-    dirty_csi_data = csi_data*np.exp(1j*(z+sfo*frequencies))
-
-    # Multipath
-    for i in range(L-1):
-        mp_phis = -1j*2*PI*frequencies*delays[i]
-        mp_alpha = gains[i]
-        multipath_csi = mp_alpha*np.exp(mp_phis)
-        dirty_csi_data += multipath_csi
-    return csi_data, dirty_csi_data
-    '''
-    #plotting
+    # Plotting
     a_i    = x0[0:L]
     phi_i  = x0[L:2*L] * 1e-9 
-    a_hw1  = x0[-6]
-    a_hw2  = x0[-5]
-    delta1 = x0[-4]
-    delta2 = x0[-3]
-    beta1  = x0[-2]
-    beta2  = x0[-1]
+    delta_rel = x0[-3] * 1e-9
+    beta1 = x0[-2]
+    beta_rel =  x0[-1]
+    
+    C_est1 = np.zeros(N_SC, dtype=complex)
+    C_est2 = np.zeros(N_SC, dtype=complex)
+
+    for i in range(L):
+        C_est1 += a_i[i] * 1e-2 * np.exp(-1j * 2 * PI * F_SC1 * phi_i[i]) 
+        C_est2 += a_i[i] * 1e-2 * np.exp(-1j * 2 * PI * F_SC2 * phi_i[i])
+    
+    C_est1 *= np.exp(1j * beta1)
+    C_est2 *= np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
+    C_composite = np.concatenate((C_est1, C_est2))
+    
+    a_i         = res.x[0:L] * 1e-2
+    phi_i       = res.x[L:2*L] * 1e-9 
+    delta_rel   = res.x[-3] * 1e-9
+    beta1       = res.x[-2]
+    beta_rel    = res.x[-1]
     
     C_est1 = np.zeros(N_SC, dtype=complex)
     C_est2 = np.zeros(N_SC, dtype=complex)
@@ -183,11 +194,17 @@ def main():
         C_est1 += a_i[i] * np.exp(-1j * 2 * PI * F_SC1 * phi_i[i]) 
         C_est2 += a_i[i] * np.exp(-1j * 2 * PI * F_SC2 * phi_i[i])
     
-    C_est1 *= a_hw1 * np.exp(1j * (beta1 -2*PI*F_SC1*delta1))
-    C_est2 *= a_hw2 * np.exp(1j * (beta2 -2*PI*F_SC2*delta2))
-    C_composite = np.concatenate((C_est1, C_est2))
+    C_est1 *= np.exp(1j * beta1)
+    C_est2 *= np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
+    C_est_opt = np.concatenate((C_est1, C_est2))
+
+    correction_factor = np.exp(-1j * (beta_rel - 2 * PI * F_SC2 * delta_rel))
+    channel2_aligned = C_est2 * correction_factor
     
-    plotPerformance(C_ref, C_composite)
+    # Combine the frequency axes and the aligned data
+    C_stitched_measured = np.concatenate((channel1, channel2_aligned))
+
+    plotPerformance(C_ref, C_stitched_measured, C_est_opt)
 
 if __name__ == "__main__":
     main()
