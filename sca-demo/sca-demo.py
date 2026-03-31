@@ -15,13 +15,13 @@ PI              = np.pi
 F_SC1 = np.linspace(F_C1, F_C1+(N_SC*SCS), N_SC)
 F_SC2 = np.linspace(F_C2, F_C2+(N_SC*SCS), N_SC)
 
-def constructMultipath(frequencies, delays, gains, delta, beta, L):
+def constructMultipath(frequencies, delays, gains, delta, beta, L, hw_gain):
     delta *= 1e-9
     channel = np.zeros(N_SC, dtype=complex)
     for i in range(L):
         channel += gains[i]*np.exp(-1j*2*PI*frequencies*delays[i])
 
-    channel *= 1 * np.exp(1j * (beta -2*PI*frequencies*delta))
+    channel *= hw_gain * np.exp(1j * (beta -2*PI*frequencies*delta))
     return channel
 
 ### Channel Estimation ###
@@ -48,6 +48,7 @@ def objective(x, C_measured, L):
     """
     a_i    = x[0:L] * 1e-2
     phi_i  = x[L:2*L] * 1e-9 
+    gamma_rel = x[-4]
     delta_rel = x[-3] * 1e-9
     beta1 = x[-2]
     beta_rel =  x[-1]
@@ -60,7 +61,7 @@ def objective(x, C_measured, L):
         C_est2 += a_i[i] * np.exp(-1j * 2 * PI * F_SC2 * phi_i[i])
     
     C_est1 *= np.exp(1j*beta1)
-    C_est2 *=  np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
+    C_est2 *=  gamma_rel*np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
     C_composite = np.concatenate((C_est1, C_est2))
 
     error = C_measured - (C_composite)
@@ -69,8 +70,9 @@ def objective(x, C_measured, L):
 def runOptimization(c_ref, L, x0):
 
     bounds = []
-    for i in range(L): bounds.append((0, L*1e2))        # Amplitudes
+    for i in range(L): bounds.append((0, L*1e2))    # Amplitudes
     for i in range(L): bounds.append((0, 150))      # Delays 
+    bounds.append((0.001,10))                       # Relative Gain
     bounds.append((-100, 200))                      # Relative Linear Phase
     bounds.append((-PI/2, PI/2))                    # Baseline Phase Offset
     bounds.append((-PI/2, PI/2))                    # Relative Phase Offset
@@ -83,12 +85,13 @@ def runOptimization(c_ref, L, x0):
         x0=x0, 
         args=(c_ref, L), 
         bounds=bounds,
-        options={'disp': 0, 'max_iter': 1000} 
+        options={'disp': 0, 'max_iter': 300} 
     )
 
     print(f"Optimization Success: {res.success}")
     print(f"Extracted Amplitudes: {res.x[0:L]}")
     print(f"Extracted Apparent Delays (ns): {res.x[L:2*L]}")
+    print(f"Extracted Rel Gamma : {res.x[-4]}")
     print(f"Extracted Rel Delta (ns): {res.x[-2]}")
     print(f"Extracted Rel Beta (rad): {res.x[-1]}")
     print(f"Objective Value: {res.fun}")
@@ -142,14 +145,16 @@ def main():
     L = 3
     multipath_delays = np.array([16.7, 22, 25, 28, 50])*1e-9
     multipath_alphas = np.array([0.75, 0.25, 0.20, 0.15, 0.10])
-    channel1 = constructMultipath(F_SC1, multipath_delays, multipath_alphas, sfo[0], z[0], L)
-    channel2 = constructMultipath(F_SC2, multipath_delays, multipath_alphas, sfo[1], z[1], L)
+    hw_gains = [1.1, 0.8]
+    channel1 = constructMultipath(F_SC1, multipath_delays, multipath_alphas, sfo[0], z[0], L, hw_gains[0])
+    channel2 = constructMultipath(F_SC2, multipath_delays, multipath_alphas, sfo[1], z[1], L, hw_gains[1])
     
     # Parameter Estimation
-    x0 = np.zeros(2*L + 3)
+    x0 = np.zeros(2*L + 4)
     # Initial Guesses
     x0[0:L] = [50, 50, 10]           
     x0[L:2*L] = [17.74 + sfo[0], 22.96 + sfo[0], 26.05 + sfo[0]]
+    x0[-4] = 1.0
     x0[-3] = (sfo[1] - sfo[0]) + 0.04
     x0[-2] = 0.0
     x0[-1] = 0.0
@@ -166,6 +171,7 @@ def main():
     # Plotting
     a_i    = x0[0:L]
     phi_i  = x0[L:2*L] * 1e-9 
+    gamma_rel = x0[-4]
     delta_rel = x0[-3] * 1e-9
     beta1 = x0[-2]
     beta_rel =  x0[-1]
@@ -178,11 +184,12 @@ def main():
         C_est2 += a_i[i] * 1e-2 * np.exp(-1j * 2 * PI * F_SC2 * phi_i[i])
     
     C_est1 *= np.exp(1j * beta1)
-    C_est2 *= np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
+    C_est2 *= gamma_rel * np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
     C_composite = np.concatenate((C_est1, C_est2))
     
     a_i         = res.x[0:L] * 1e-2
     phi_i       = res.x[L:2*L] * 1e-9 
+    gamma_rel    = res.x[-4]
     delta_rel   = res.x[-3] * 1e-9
     beta1       = res.x[-2]
     beta_rel    = res.x[-1]
@@ -195,10 +202,10 @@ def main():
         C_est2 += a_i[i] * np.exp(-1j * 2 * PI * F_SC2 * phi_i[i])
     
     C_est1 *= np.exp(1j * beta1)
-    C_est2 *= np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
+    C_est2 *= gamma_rel * np.exp(1j * (beta_rel + beta1 -2*PI*F_SC2*delta_rel))
     C_est_opt = np.concatenate((C_est1, C_est2))
 
-    correction_factor = np.exp(-1j * (beta_rel - 2 * PI * F_SC2 * delta_rel))
+    correction_factor = (1.0/gamma_rel)*np.exp(-1j * (beta_rel - 2 * PI * F_SC2 * delta_rel))
     channel2_aligned = C_est2 * correction_factor
     
     # Combine the frequency axes and the aligned data
