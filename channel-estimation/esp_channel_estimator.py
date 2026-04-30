@@ -169,8 +169,8 @@ def main():
 
     n_avg = 10
     try:
-        data_ch1 = np.load("csi_processed_ch1.npy") 
-        data_ch13 = np.load("csi_processed_ch13.npy")
+        data_ch1 = np.load("CSI_Data/csi_processed_ch1.npy") 
+        data_ch13 = np.load("CSI_Data/csi_processed_ch13.npy")
     except FileNotFoundError:
         print("Error: .npy files not found. Ensure they are in the same folder.")
         return
