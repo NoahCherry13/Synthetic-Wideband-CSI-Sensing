@@ -24,6 +24,79 @@ def constructMultipath(frequencies, delays, gains, delta, beta, L, hw_gain):
     channel *= hw_gain * np.exp(1j * (beta -2*PI*frequencies*delta))
     return channel
 
+
+def find_initial_guess_sic(C_obs, F_obs, F1, F13, L, loop_gain=0.85, oversampling=8):
+    """
+    Uses Successive Interference Cancellation (CLEAN) to extract high-fidelity
+    initial coordinates for L paths from the combined frequency-domain channel.
+    
+    Parameters:
+    -----------
+    C_obs : array_like, complex
+        The concatenated, measured (and normalized) CSI spectrum.
+    F_obs : array_like, float
+        The full concatenated physical frequency vector.
+    F1, F13 : array_like, float
+        Individual frequency grids for both channels (to aid baseline extraction).
+    L : int
+        Number of paths to extract.
+    loop_gain : float
+        Fraction of the peak to subtract each iteration (0.5 to 0.95). 
+        Lower values prevent over-subtraction if paths are dense.
+    """
+    # 1. Setup oversampled time-domain grid
+    n_fft = len(C_obs) * oversampling
+    
+    # Estimate the effective sampling rate from frequency spacing
+    # Note: If there is a huge gap between Ch1 and Ch13, we treat it as an interleaved band.
+    df = np.mean(np.diff(F_obs))
+    fs = df * len(C_obs)
+    t_resolution = 1.0 / fs
+    t_axis = np.linspace(0, t_resolution * n_fft, n_fft) * 1e9 # Time grid in ns
+    
+    C_residual = C_obs.copy()
+    
+    est_amplitudes = []
+    est_delays = []
+    
+    for path in range(L):
+        # Compute Power Delay Profile of the current residual data
+        pdp = np.fft.ifft(C_residual, n=n_fft)
+        pdp_mag = np.abs(pdp)
+        
+        # Limit search space to a physically realistic window (e.g., 0 to 180 ns)
+        valid_indices = np.where(t_axis <= 180)[0]
+        peak_idx = valid_indices[np.argmax(pdp_mag[valid_indices])]
+        
+        # Extract path parameters
+        tau_k_ns = t_axis[peak_idx]
+        alpha_k = pdp[peak_idx] # Complex path weight
+        
+        est_delays.append(tau_k_ns)
+        est_amplitudes.append(np.abs(alpha_k))
+        
+        # Construct the single-path frequency steering vector
+        # (Passband modeling matching your objective function)
+        steering_vector = np.exp(-1j * 2 * np.pi * F_obs * (tau_k_ns * 1e-9))
+        
+        # Cancel a fraction of this path's contribution from the frequency spectrum
+        C_residual -= loop_gain * alpha_k * steering_vector
+
+    # 2. Package parameters for IPOPT input array structure:
+    # x = [a1..aL, phi1..phiL, gamma_rel, delta_rel, beta1, beta_rel]
+    x0 = np.zeros(2 * L + 4)
+    x0[0:L] = est_amplitudes
+    x0[L:2*L] = est_delays
+    
+    # 3. Handle Hardware Baselines Initializations
+    x0[-4] = 1.0  # gamma_rel default baseline
+    x0[-3] = 0.0  # delta_rel (ns) default baseline
+    
+    # Extract structural initial phase over the first channel block
+    x0[-2] = np.angle(C_obs[0]) 
+    x0[-1] = 0.0  # beta_rel default baseline
+    
+    return x0
 ### Channel Estimation ###
 # Channel Model =  alpha * exp(j*(beta - 2*pi*fsc*delta)* sum_k(G_k * exp(j * phi_k))
 def objective(x, C_measured, L):
@@ -85,7 +158,7 @@ def runOptimization(c_ref, L, x0):
         x0=x0, 
         args=(c_ref, L), 
         bounds=bounds,
-        options={'disp': 0, 'max_iter': 300} 
+        options={'disp': 0, 'max_iter': 500} 
     )
 
     print(f"Optimization Success: {res.success}")
@@ -138,8 +211,8 @@ def plotPerformance(channel1, channel2, channel_est):
 def main():
     #Do stuff
     # Hardware Phase Distortion
-    z   = [PI/4, PI/6]          # CFO Phase Offset
-    sfo = [100, 80]    # SFO Linear Phase
+    z   = [PI/4, PI/6]  # CFO Phase Offset
+    sfo = [100, 80]     # SFO Linear Phase
 
     # Multipath Params
     L = 3
@@ -152,7 +225,7 @@ def main():
     # Parameter Estimation
     x0 = np.zeros(2*L + 4)
     # Initial Guesses
-    x0[0:L] = [50, 50, 10]           
+    x0[0:L] = [60, 50, 10]           
     x0[L:2*L] = [17.74 + sfo[0], 22.96 + sfo[0], 26.05 + sfo[0]]
     x0[-4] = 1.0
     x0[-3] = (sfo[1] - sfo[0]) + 0.04
@@ -169,12 +242,12 @@ def main():
     res = runOptimization(C_ref, L, x0)
 
     # Plotting
-    a_i    = x0[0:L]
-    phi_i  = x0[L:2*L] * 1e-9 
-    gamma_rel = x0[-4]
-    delta_rel = x0[-3] * 1e-9
-    beta1 = x0[-2]
-    beta_rel =  x0[-1]
+    # a_i    = x0[0:L]
+    # phi_i  = x0[L:2*L] * 1e-9 
+    # gamma_rel = x0[-4]
+    # delta_rel = x0[-3] * 1e-9
+    # beta1 = x0[-2]
+    # beta_rel =  x0[-1]
     
     C_est1 = np.zeros(N_SC, dtype=complex)
     C_est2 = np.zeros(N_SC, dtype=complex)
