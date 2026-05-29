@@ -51,7 +51,7 @@
 
 static const uint8_t CONFIG_CSI_SEND_MAC[] = {0x80, 0xb5, 0x4e, 0xf7, 0x45, 0x30};
 static const char *TAG = "csi_send";
-static const uint8_t hop_channels[] = {6, 11};
+static const uint8_t hop_channels[] = {1, 13};
 
 typedef struct{
     uint32_t    send_stamp;
@@ -189,8 +189,11 @@ void app_main()
     ESP_LOGI(TAG, "Starting Fast Sweeper TX...");
 
     while (1) {
-        ESP_ERROR_CHECK(esp_wifi_set_channel(hop_channels[chan_idx], WIFI_SECOND_CHAN_BELOW));
-        
+        if(chan_idx == 0){
+            ESP_ERROR_CHECK(esp_wifi_set_channel(hop_channels[chan_idx], WIFI_SECOND_CHAN_ABOVE));
+        }else if(chan_idx == 1){
+            ESP_ERROR_CHECK(esp_wifi_set_channel(hop_channels[chan_idx], WIFI_SECOND_CHAN_BELOW));
+        }
         vTaskDelay(pdMS_TO_TICKS(5)); 
         
         for (int i = 0; i < 10; i++) {

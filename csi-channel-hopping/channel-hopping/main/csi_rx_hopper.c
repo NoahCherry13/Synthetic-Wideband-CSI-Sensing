@@ -47,7 +47,7 @@
 
 static const uint8_t CONFIG_CSI_SEND_MAC[] = {0x80, 0xb5, 0x4e, 0xf7, 0x43, 0xbc};
 static const char *TAG = "csi_recv";
-static const uint8_t hop_channels[] = {6, 11};
+static const uint8_t hop_channels[] = {1, 13};
 
 typedef struct{
     uint32_t    send_stamp;
@@ -139,7 +139,7 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
 
     payload_t *payload = (payload_t *)(info->payload);
     ets_printf("CSI_DATA,%d,%u," MACSTR ",%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
-            rx_ctrl->channel, payload->send_stamp, MAC2STR(info->mac), rx_ctrl->rssi, rx_ctrl->rate, rx_ctrl->sig_mode,
+            rx_ctrl->channel, rx_ctrl->timestamp, MAC2STR(info->mac), rx_ctrl->rssi, rx_ctrl->rate, rx_ctrl->sig_mode,
             rx_ctrl->mcs, rx_ctrl->cwb, rx_ctrl->smoothing, rx_ctrl->not_sounding,
             rx_ctrl->aggregation, rx_ctrl->stbc, rx_ctrl->fec_coding, rx_ctrl->sgi,
             rx_ctrl->noise_floor, rx_ctrl->ampdu_cnt, rx_ctrl->secondary_channel,
@@ -220,7 +220,7 @@ static void rx_hopper_task(void *pvParameters) {
         ESP_LOGI(TAG, "--- INITIATING NUCLEAR HOP TO CHANNEL %d ---", hop_channels[chan_idx]);
 
         ESP_LOGI(TAG, "CHANNEL: %d", hop_channels[0]);
-        esp_wifi_set_channel(hop_channels[0], WIFI_SECOND_CHAN_BELOW);
+        esp_wifi_set_channel(hop_channels[0], WIFI_SECOND_CHAN_ABOVE);
         vTaskDelay(pdMS_TO_TICKS(25)); 
         ESP_LOGI(TAG, "CHANNEL: %d", hop_channels[1]);
         esp_wifi_set_channel(hop_channels[1], WIFI_SECOND_CHAN_BELOW);
